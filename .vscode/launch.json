@@ -1,0 +1,21 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "gdb",
+            "request": "launch",
+            "name": "Debug Microcontroller",
+            "cwd": "${workspaceRoot}",
+            "gdbpath" : "arm-none-eabi-gdb",
+            "target" : "${workspaceRoot}/target/thumbv7m-none-eabi/debug/blue-pill-quickstart-rtfm",
+            "autorun": [
+                "target remote localhost:3333",
+                "monitor reset halt",
+                "load ./target/thumbv7m-none-eabi/debug/blue-pill-quickstart-rtfm"
+            ]
+        }
+    ]
+}
