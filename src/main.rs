@@ -4,46 +4,65 @@
 // set the panic handler
 extern crate panic_semihosting;
 
-use core::sync::atomic::{AtomicBool, Ordering};
-use cortex_m::peripheral::syst::SystClkSource;
-use cortex_m_rt::{entry, exception};
-use stm32f1xx_hal::prelude::*;
+extern crate stm32f1xx_hal as hal;
+extern crate stm32f1;
+use rtfm::app;
 
-static TOGGLE_LED: AtomicBool = AtomicBool::new(false);
+use hal::prelude::*;
+use hal::timer::{self, Timer};
 
-#[entry]
-fn main() -> ! {
-    let mut core = cortex_m::Peripherals::take().unwrap();
-    let device = stm32f1xx_hal::stm32::Peripherals::take().unwrap();
-    let mut rcc = device.RCC.constrain();
-    let mut flash = device.FLASH.constrain();
+// CONSTANTS
+const FREQ: u32 = 512;
 
-    let clocks = rcc
-        .cfgr
-        .use_hse(8.mhz())
-        .sysclk(16.mhz())
-        .freeze(&mut flash.acr);
+#[app(device = stm32f1::stm32f103)]
+const APP: () = {
+    // resources
+    static mut LED : stm32f1xx_hal::gpio::gpioc::PC13<stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>> = ();
+    static mut CNT : u32 = 0;
 
-    // configure the user led
-    let mut gpioc = device.GPIOC.split(&mut rcc.apb2);
-    let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
+    #[init ]
+    fn init() {
+        let mut flash = device.FLASH.constrain();
+        let mut rcc = device.RCC.constrain();
 
-    // configure SysTick to generate an exception every second
-    core.SYST.set_clock_source(SystClkSource::Core);
-    core.SYST.set_reload(clocks.sysclk().0);
-    core.SYST.enable_counter();
-    core.SYST.enable_interrupt();
+        // configure the clocks
+        let clocks = rcc.cfgr
+            .use_hse(8.mhz())
+            .sysclk(64.mhz())
+            .pclk1(32.mhz())
+            .freeze(&mut flash.acr);
+        // configure SysTick to generate 512 exceptions every second
+        Timer::syst(core.SYST, FREQ.hz(), clocks).listen(timer::Event::Update);
 
-    loop {
-        // sleep
-        cortex_m::asm::wfi();
-        if TOGGLE_LED.swap(false, Ordering::AcqRel) {
-            led.toggle();
+        // configure the user led
+        let mut gpioc = device.GPIOC.split(&mut rcc.apb2);
+        let led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
+
+        // late resource assignments
+        LED = led;
+    }
+
+    #[idle (resources=[LED,CNT])]
+    fn idle() -> ! {
+        let mut toggle_led : bool = false;;   
+        loop {
+            cortex_m::asm::wfi();
+            // lock and check cnt, want to toggle_led once per second
+            resources.CNT.lock(|cnt| {
+                if *cnt == FREQ {
+                    toggle_led = true;
+                    *cnt =  0;
+                }
+            });
+            if toggle_led {
+                toggle_led = false;
+                resources.LED.toggle();
+            }
         }
     }
-}
 
-#[exception]
-fn SysTick() {
-    TOGGLE_LED.store(true, Ordering::Release);
-}
+    #[exception (resources=[CNT])]
+    fn SysTick() {
+        *resources.CNT += 1;
+    }
+};
